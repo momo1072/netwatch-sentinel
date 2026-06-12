@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+logs/*.log
+config/known_devices.json
+config/port_snapshot.json
+scan_result.json
+.DS_Store
+venv/
+.venv/
