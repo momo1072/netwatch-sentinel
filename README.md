@@ -1,7 +1,7 @@
 # 🛡️ netwatch-sentinel
 
 > **Intelligentes Heimnetz-Überwachungssystem** – gebaut auf dem Raspberry Pi 400  
-> Erkennt unbekannte Geräte, überwacht ARP-Tabellen und analysiert offene Ports.
+> Erkennt unbekannte Geräte, überwacht ARP-Tabellen, analysiert Ports und visualisiert alles in Grafana.
 
 ---
 
@@ -13,14 +13,16 @@ Das Projekt verbindet Themen aus **LF09 (Netzwerke und Dienste)** mit praktische
 
 ---
 
-## Features (Phase 1)
+## Features
 
-| Modul | Funktion |
-|---|---|
-| `core/scanner.py` | Netzwerk-Scan via `nmap` — welche Geräte sind online? |
-| `core/arp_monitor.py` | ARP-Tabelle überwachen — neue MACs und Spoofing-Verdacht |
-| `core/port_watcher.py` | Port-Monitoring — neue / unerwartet offene Ports erkennen |
-| `logs/logger.py` | Strukturiertes JSON-Logging (Grafana-ready) |
+| Phase | Modul | Funktion |
+|---|---|---|
+| 1 | `core/scanner.py` | Netzwerk-Scan via nmap — welche Geräte sind online? |
+| 1 | `core/arp_monitor.py` | ARP-Tabelle überwachen — neue MACs und Spoofing-Verdacht |
+| 1 | `core/port_watcher.py` | Port-Monitoring — neue / unerwartet offene Ports erkennen |
+| 1 | `logs/logger.py` | Strukturiertes JSON-Logging (Grafana-ready) |
+| 2 | `alerts/notifier.py` | Telegram Alerts bei Anomalien auf iPhone |
+| 3 | `dashboard/exporter.py` | Prometheus Exporter — Metriken für Grafana |
 
 ---
 
@@ -32,17 +34,35 @@ netwatch-sentinel/
 │   ├── scanner.py        # Netzwerk-Scan (nmap)
 │   ├── arp_monitor.py    # ARP-Spoofing Erkennung
 │   └── port_watcher.py   # Port-Monitoring
-├── alerts/               # (Phase 2) Telegram / E-Mail Alerts
-├── dashboard/            # (Phase 3) Prometheus Exporter + Grafana JSONs
+├── alerts/
+│   └── notifier.py       # Telegram Alerts
+├── dashboard/
+│   └── exporter.py       # Prometheus Metrics Exporter (:8888)
 ├── logs/
 │   ├── logger.py         # JSON-Logger
 │   └── netwatch.log      # (wird automatisch erstellt)
 ├── config/
 │   ├── known_devices.json  # Whitelist bekannter Geräte
 │   └── port_snapshot.json  # Baseline offener Ports
-├── tests/                # Unit Tests
+├── tests/
+│   └── test_scanner.py   # Unit Tests
 ├── main.py               # Einstiegspunkt
 └── requirements.txt
+```
+
+---
+
+## Infrastruktur
+
+```
+Raspberry Pi 400 (Hamburg)
+├── netwatch-sentinel       ← dieses Projekt
+├── Pi-hole                 ← DNS-Blocker
+├── Docker
+│   ├── Prometheus :9090    ← Metriken sammeln
+│   ├── Grafana :3000       ← Dashboard visualisieren
+│   └── Node Exporter :9100 ← Pi-Hardware Metriken
+└── Tailscale VPN           ← Fernzugriff von überall
 ```
 
 ---
@@ -52,116 +72,151 @@ netwatch-sentinel/
 ### 1. Voraussetzungen
 
 ```bash
-# nmap installieren (Linux/macOS)
-sudo apt install nmap        # Debian/Ubuntu/Raspberry Pi OS
-brew install nmap            # macOS
-
-# Python-Abhängigkeiten
+sudo apt install nmap -y
 pip install -r requirements.txt
 ```
 
 ### 2. Netzwerk lernen (einmalig)
 
-Beim ersten Start speicherst du das aktuelle Netzwerk als **Baseline** (vertrauenswürdige Geräte):
-
 ```bash
-sudo python main.py --learn
+sudo python3 main.py --learn
 ```
-
-> Warum `sudo`? ARP-Scans und OS-Erkennung brauchen erhöhte Rechte.
 
 ### 3. Einmaliger Scan
 
 ```bash
-sudo python main.py
-```
-
-Beispiel-Output:
-```
-  [1/3] Netzwerk-Scan: 192.168.2.0/24
-
-  IP-Adresse         Hostname                       MAC-Adresse          Hersteller
-  ─────────────────────────────────────────────────────────────────────────────────
-  192.168.2.1        router.local                   aa:bb:cc:dd:ee:ff    AVM GmbH
-  192.168.2.186      raspberrypi.local              11:22:33:44:55:66    Raspberry Pi
-
-  [2/3] ARP-Monitor
-  ✓ Keine Anomalien erkannt. Alles normal.
-
-  [3/3] Port-Check auf eigenem Host: 192.168.2.186
-  Port     Protokoll    Service         Bekannt als
-  ─────────────────────────────────────────────────
-  22       tcp          ssh             SSH – Fernzugriff
-  3000     tcp          ppp             Grafana Dashboard
-  9090     tcp          zeus-admin      Prometheus Metrics
+sudo python3 main.py
 ```
 
 ### 4. Dauerhaftes Monitoring
 
 ```bash
-sudo python main.py --watch 60    # Prüft alle 60 Sekunden
+sudo python3 main.py --watch 60
+```
+
+### 5. Prometheus Exporter starten
+
+```bash
+python3 dashboard/exporter.py
+# Metriken: http://192.168.2.186:8888/metrics
 ```
 
 ---
 
-## Geplante Features (Roadmap)
+## Telegram Alerts
 
-### Phase 2 — Alerts
-- [ ] Telegram Bot Benachrichtigungen bei Anomalien
-- [ ] E-Mail Alerts (SMTP)
-- [ ] Konfigurierbare Alert-Regeln in `alerts/rules.yaml`
+Bei Anomalien (neues Gerät, ARP-Spoofing, neuer Port) wird automatisch eine Nachricht an Telegram gesendet.
 
-### Phase 3 — Dashboard
-- [ ] Prometheus Exporter (`/metrics` Endpoint)
-- [ ] Grafana Dashboard (Geräteanzahl, neue MACs, Port-Änderungen)
-- [ ] Docker Compose für einfaches Deployment
+`.env` Datei erstellen:
 
-### Phase 4 — Advanced Security
-- [ ] CVE-Check gegen bekannte Schwachstellen-Datenbank
-- [ ] Honeypot-Erkennung (wer scannt mich?)
-- [ ] BSI IT-Grundschutz Auditbericht Generator
+```
+TELEGRAM_TOKEN=dein_token
+TELEGRAM_CHAT_ID=deine_chat_id
+```
+
+---
+
+## Grafana Dashboard
+
+Das Netwatch Sentinel Dashboard zeigt:
+- Anzahl aktiver Geräte im Netzwerk (live)
+- Zeitverlauf der Gerätezahl
+- Prometheus Metriken: `netwatch_devices_total`, `netwatch_device_up`
+
+Prometheus Konfiguration (`prometheus.yml`):
+
+```yaml
+scrape_configs:
+  - job_name: 'netwatch'
+    static_configs:
+      - targets: ['192.168.2.186:8888']
+```
+
+---
+
+## systemd Service
+
+Der Exporter startet automatisch beim Pi-Boot:
+
+```bash
+sudo systemctl enable netwatch-exporter
+sudo systemctl start netwatch-exporter
+sudo systemctl status netwatch-exporter
+```
+
+---
+
+## Fernzugriff via Tailscale
+
+Mit Tailscale VPN ist der Pi von überall erreichbar:
+
+```bash
+ssh homeles82@100.101.248.114
+```
+
+Grafana im Browser:
+```
+http://100.101.248.114:3000
+```
 
 ---
 
 ## IT-Security Konzepte in diesem Projekt
 
-Dieses Projekt verbindet Theorie aus der FISI-Ausbildung mit praktischer Umsetzung:
-
-| Konzept | Umsetzung im Code |
+| Konzept | Umsetzung |
 |---|---|
 | **CIA-Triade** | Vertraulichkeit durch Port-Monitoring, Integrität durch ARP-Check |
 | **ARP-Spoofing** | `arp_monitor.py` erkennt MAC-Wechsel auf bekannten IPs |
 | **BSI IT-Grundschutz** | Logging und Monitoring entspricht Baustein NET.1 |
 | **Incident Detection** | Anomalie-Alerts mit Schweregrad-Klassifizierung |
+| **Zero Trust** | Tailscale VPN für sicheren Fernzugriff |
 | **Least Privilege** | Root nur wo nötig (nmap), normaler User für Logs/Alerts |
 
 ---
 
 ## Lerntagebuch
 
-> Dokumentation des Lernfortschritts — entstanden während der Umschulung
-
 **Phase 1 gelernt:**
-- Python `subprocess`-Modul zum Lesen von Systemkommandos
+- Python `subprocess` zum Lesen von Systemkommandos
 - `python-nmap` als Wrapper für nmap-Scans
 - Regex für das Parsen der ARP-Tabelle
-- Strukturiertes JSON-Logging mit Python's `logging`-Modul
+- Strukturiertes JSON-Logging mit Python `logging`-Modul
 - Modularer Projektaufbau mit sinnvoller Ordnerstruktur
+
+**Phase 2 gelernt:**
+- Telegram Bot API
+- HTTP Requests mit Python `requests`-Bibliothek
+- Umgebungsvariablen und `.env` Dateien
+- Alert-System mit Schweregrad-Klassifizierung
+
+**Phase 3 gelernt:**
+- Prometheus Metriken Format
+- HTTP Server in Python (`BaseHTTPRequestHandler`)
+- Grafana Dashboard erstellen und konfigurieren
+- systemd Services erstellen und verwalten
+- Tailscale VPN einrichten
 
 ---
 
 ## Hardware
 
-Läuft auf einem **Raspberry Pi 400** (Homelab)
+Läuft auf einem **Raspberry Pi 400** (Homelab Hamburg)
 - OS: Raspberry Pi OS (Debian Bookworm)
-- IP: `192.168.2.186`
-- Services: Pi-hole, Docker, Grafana, Prometheus
+- RAM: 4GB
+- Services: Pi-hole, Docker, Grafana, Prometheus, Tailscale
 
 ---
 
-## Lizenz
+## Roadmap
 
-MIT License — freie Nutzung für Bildungszwecke.
+- [x] Phase 1 — Netzwerk-Scanner, ARP-Monitor, Port-Watcher
+- [x] Phase 2 — Telegram Alerts
+- [x] Phase 3 — Prometheus Exporter + Grafana Dashboard
+- [x] systemd Service für automatischen Start
+- [x] Tailscale VPN für Fernzugriff
+- [ ] Phase 4 — CVE-Check gegen Schwachstellen-Datenbank
+- [ ] Phase 4 — Honeypot-Erkennung
+- [ ] Phase 4 — BSI IT-Grundschutz Auditbericht Generator
 
 ---
 
